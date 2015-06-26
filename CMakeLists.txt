@@ -12,6 +12,7 @@ find_package(catkin REQUIRED COMPONENTS
   image_transport
   sensor_msgs
   tf
+  message_generation
 )
 
 ## System dependencies are found with CMake's conventions
@@ -87,6 +88,7 @@ catkin_package(
 #  LIBRARIES aruco_ros
 #  CATKIN_DEPENDS cv_bridge geometry_msgs image_transport sensor_msgs tf
 #  DEPENDS system_lib
+  CATKIN_DEPENDS message_runtime
 )
 
 ###########
