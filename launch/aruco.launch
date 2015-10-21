@@ -4,7 +4,7 @@
   <arg name="drawMarkers" default="true" />
   
   <!-- Launch AR tag tracking node -->
-  <node name="aruco" pkg="aruco_ros" type="aruco_ros_node" >
+  <node name="aruco" pkg="aruco_ros" type="aruco_ros_node" output="screen">
     <param name="camera" value="$(arg cameraName)" />
     <param name="markerSize" value="$(arg markerSize)" />
     <param name="drawMarkers" value="$(arg drawMarkers)" />

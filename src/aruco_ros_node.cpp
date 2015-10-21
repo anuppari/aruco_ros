@@ -10,16 +10,16 @@
 #include <image_geometry/pinhole_camera_model.h>
 
 #include <typeinfo>
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/imgproc.hpp>
+#include <opencv2/highgui.hpp>
+#include <opencv2/calib3d.hpp>
 #include <iostream>
 #include <stdio.h>
 #include <fstream>
 #include <sstream>
 #include <math.h>
-#include "aruco.h"
-#include "cvdrawingutils.h"
+#include <aruco/aruco.h>
+//#include <aruco/cvdrawingutils.h>
 
 void rvec2quat(cv::Mat&, cv::Mat&);
 
@@ -60,7 +60,8 @@ public:
         
         // Image and camera parameter subscribers
         cam_sub = it.subscribeCamera(cameraName+"/image_raw", 1, &SubscribeAndPublish::imageCb,this);
-
+        
+        
     }
     
     void imageCb(const sensor_msgs::ImageConstPtr& imageMsg, const sensor_msgs::CameraInfoConstPtr& camInfoMsg)
@@ -68,6 +69,7 @@ public:
         //Convert to opencv image
         cv_bridge::CvImagePtr cv_ptr;
         cv::Mat image;
+        
         try
         {
             cv_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
@@ -86,6 +88,11 @@ public:
         camMat.convertTo(camMat,CV_32FC1);
         cv::Mat distCoeffs;
         cam_model.distortionCoeffs().convertTo(distCoeffs,CV_32FC1);
+        if (cv::countNonZero(camMat) < 1) // check if camera parameters are default values used when not set by camera driver, and serve empty Mat to detector
+        {
+            camMat = cv::Mat();
+            distCoeffs = cv::Mat();
+        }
         
         try
         {
