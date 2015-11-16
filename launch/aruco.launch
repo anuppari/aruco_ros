@@ -1,13 +1,18 @@
 <launch>
-  <arg name="cameraName" default="/camera" />
+  <arg name="cameraName" default="/mv_BF001066" />
   <arg name="markerSize" default="0.2032" />
   <arg name="drawMarkers" default="true" />
+  <arg name="view" default="true" />
   
   <!-- Launch AR tag tracking node -->
   <node name="aruco" pkg="aruco_ros" type="aruco_ros_node" output="screen">
     <param name="camera" value="$(arg cameraName)" />
     <param name="markerSize" value="$(arg markerSize)" />
     <param name="drawMarkers" value="$(arg drawMarkers)" />
+  </node>
+  
+  <node if="$(arg view)" name="image_view" pkg="image_view" type="image_view">
+    <remap from="image" to="markerImage" />
   </node>
   
 </launch>
