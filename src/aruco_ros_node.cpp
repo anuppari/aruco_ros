@@ -37,12 +37,14 @@ class SubscribeAndPublish
     ros::Publisher markerImagePub;
     tf::TransformBroadcaster tfBr;
     std::string cameraName;
+    std::string image_frame_id;
     aruco::MarkerDetector MDetector;
 public:
     SubscribeAndPublish() : it(n)
     {
         //Camera name and marker size parameters
         n.param<std::string>(ros::this_node::getName()+"/camera", cameraName, "camera");
+        n.param<std::string>(ros::this_node::getName()+"/image_frame_id", image_frame_id, "image");
         n.param<double>(ros::this_node::getName()+"/markerSize", markerSize, 0.2032);
         n.param<bool>(ros::this_node::getName()+"/drawMarkers", drawMarkers, true);
         
@@ -124,7 +126,7 @@ public:
                     char frameName[16];
                     sprintf(frameName,"marker%d",TheMarkers[i].id);
                     */
-                    tfBr.sendTransform(tf::StampedTransform(transf,timeNow,"image",std::string("marker")+buffer));
+                    tfBr.sendTransform(tf::StampedTransform(transf,timeNow,image_frame_id,std::string("marker")+buffer));
                     
                     //Publish marker pose
                     geometry_msgs::PoseStamped poseMsg;
