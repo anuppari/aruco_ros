@@ -1,5 +1,4 @@
 #include <ros/ros.h>
-#include <image_transport/image_transport.h>
 #include <geometry_msgs/PoseStamped.h>
 #include <cv_bridge/cv_bridge.h>
 #include <sensor_msgs/image_encodings.h>
@@ -7,6 +6,7 @@
 #include <sensor_msgs/Image.h>
 #include <tf/transform_broadcaster.h>
 #include <aruco_ros/Center.h>
+#include <image_transport/image_transport.h>
 #include <image_geometry/pinhole_camera_model.h>
 
 #include <typeinfo>
@@ -31,7 +31,8 @@ class SubscribeAndPublish
 {
     ros::NodeHandle n;
     image_transport::ImageTransport it;
-    image_transport::CameraSubscriber cam_sub;
+    ros::Subscriber camInfoSub;
+    image_transport::Subscriber imageSub;
     ros::Publisher markerPosePub;
     ros::Publisher markerPointPub;
     ros::Publisher markerImagePub;
@@ -39,14 +40,30 @@ class SubscribeAndPublish
     std::string cameraName;
     std::string image_frame_id;
     aruco::MarkerDetector MDetector;
+    
+    // adaptive ROI
+    bool adaptiveROI;
+    int ROItop;
+    int ROIleft;
+    int ROIwidth;
+    int ROIheight;
+    double adaptiveROIfactor;
+    
+    bool gotCamParam;
+    int imageWidth;
+    int imageHeight;
+    cv::Mat camMat;
+    cv::Mat distCoeffs;
 public:
     SubscribeAndPublish() : it(n)
     {
         //Camera name and marker size parameters
-        n.param<std::string>(ros::this_node::getName()+"/camera", cameraName, "camera");
-        n.param<std::string>(ros::this_node::getName()+"/image_frame_id", image_frame_id, "image");
-        n.param<double>(ros::this_node::getName()+"/markerSize", markerSize, 0.2032);
-        n.param<bool>(ros::this_node::getName()+"/drawMarkers", drawMarkers, true);
+        ros::NodeHandle nh("~");
+        nh.param<std::string>("camera", cameraName, "camera");
+        nh.param<std::string>("image_frame_id", image_frame_id, "image");
+        nh.param<double>("markerSize", markerSize, 0.2032);
+        nh.param<bool>("drawMarkers", drawMarkers, true);
+        nh.param<bool>("adaptiveROI", adaptiveROI, true);
         
         //Adjust marker detector parameters
         MDetector.setMinMaxSize(0.01,0.9);
@@ -60,13 +77,45 @@ public:
             markerImagePub = n.advertise<sensor_msgs::Image>("markerImage",10);
         }
         
+        // Get camera parameters
+        std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
+        gotCamParam = false;
+        camInfoSub = nh.subscribe(cameraName+"/camera_info",1,&SubscribeAndPublish::camInfoCB,this);
+        ROS_DEBUG("Waiting for camera parameters ...");
+        do {
+            ros::spinOnce();
+            ros::Duration(0.1).sleep();
+        } while (!(ros::isShuttingDown()) and !gotCamParam);
+        ROS_DEBUG("Got camera parameters");
+        
+        // Set image ROI
+        adaptiveROIfactor = 0.1;
+        ROIleft = 0;
+        ROItop = 0;
+        ROIwidth = imageWidth;
+        ROIheight = imageHeight;
+        
         // Image and camera parameter subscribers
-        cam_sub = it.subscribeCamera(cameraName+"/image_raw", 1, &SubscribeAndPublish::imageCb,this);
-        
-        
+        imageSub = it.subscribe(cameraName+"/image_raw", 1, &SubscribeAndPublish::imageCb,this);
     }
     
-    void imageCb(const sensor_msgs::ImageConstPtr& imageMsg, const sensor_msgs::CameraInfoConstPtr& camInfoMsg)
+    // callback for getting camera intrinsic parameters
+    void camInfoCB(const sensor_msgs::CameraInfoConstPtr& camInfoMsg)
+    {
+        //get camera info
+        image_geometry::PinholeCameraModel cam_model;
+        cam_model.fromCameraInfo(camInfoMsg);
+        cv::Mat camMatCV = cv::Mat(cam_model.fullIntrinsicMatrix());
+        camMatCV.convertTo(camMat,CV_64F);
+        imageHeight = camInfoMsg->height;
+        imageWidth = camInfoMsg->width;
+        
+        //unregister subscriber
+        camInfoSub.shutdown();
+        gotCamParam = true;
+    }
+    
+    void imageCb(const sensor_msgs::ImageConstPtr& imageMsg)
     {
         //Convert to opencv image
         cv_bridge::CvImagePtr cv_ptr;
@@ -83,24 +132,24 @@ public:
             return;
         }
         
-        //get camera info
-        image_geometry::PinholeCameraModel cam_model;
-        cam_model.fromCameraInfo(camInfoMsg);
-        cv::Mat camMat = cv::Mat(cam_model.fullIntrinsicMatrix());
-        camMat.convertTo(camMat,CV_32FC1);
-        cv::Mat distCoeffs;
-        cam_model.distortionCoeffs().convertTo(distCoeffs,CV_32FC1);
-        if (cv::countNonZero(camMat) < 1) // check if camera parameters are default values used when not set by camera driver, and serve empty Mat to detector
-        {
-            camMat = cv::Mat();
-            distCoeffs = cv::Mat();
-        }
-        
         try
         {
+            cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
+            
+            // Adaptive ROI
+            if (adaptiveROI)
+            {
+                // Adjust camera matrix
+                camMat.at<double>(0,2) -= ROIleft;
+                camMat.at<double>(1,2) -= ROItop;
+                
+                // draw ROI
+                cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+            }
+            
             //Detection of markers in the image passed
             vector<aruco::Marker> TheMarkers;
-            MDetector.detect(image,TheMarkers,camMat,distCoeffs,markerSize);
+            MDetector.detect(imageROI,TheMarkers,camMat,distCoeffs,markerSize);
             
             // generate pose message and tf broadcast
             if (TheMarkers.size()!=0){
@@ -108,6 +157,13 @@ public:
                 //Get image timestamp for subsequent publications
                 ros::Time timeNow = imageMsg->header.stamp;
                 
+                // reset ROI
+                int newROIleft = imageWidth;
+                int newROItop = imageHeight;
+                int newROIbottom = 0;
+                int newROIright = 0;
+                
+                // Publish
                 for (unsigned int i=0; i<TheMarkers.size(); i++) {
                     //Common Info
                     char buffer[4];
@@ -148,15 +204,43 @@ public:
                     aruco_ros::Center centerMsg;
                     centerMsg.header.stamp = timeNow;
                     centerMsg.header.frame_id = buffer;
-                    centerMsg.x = cent.x;
-                    centerMsg.y = cent.y;
+                    centerMsg.x = cent.x + ROIleft;
+                    centerMsg.y = cent.y + ROItop;
                     markerPointPub.publish(centerMsg);
                     
                     // Draw marker on image
                     if (drawMarkers){
-                        TheMarkers[i].draw(image,cv::Scalar(0,0,255));
+                        TheMarkers[i].draw(imageROI,cv::Scalar(0,0,255));
+                    }
+                    
+                    // Adaptive ROI
+                    for (unsigned int j=0; j<4; j++) {
+                        newROIleft = std::min((int) TheMarkers[i][j].x,newROIleft);
+                        newROItop = std::min((int) TheMarkers[i][j].y,newROItop);
+                        newROIright = std::max((int) TheMarkers[i][j].x,newROIright);
+                        newROIbottom = std::max((int) TheMarkers[i][j].y,newROIbottom);
                     }
                 }
+                
+                // Adjust ROI
+                if (adaptiveROI)
+                {
+                    // Reset cam matrix
+                    camMat.at<double>(0,2) += ROIleft;
+                    camMat.at<double>(1,2) += ROItop;
+                    
+                    ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*(newROIright - newROIleft)));
+                    ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*(newROIbottom - newROItop)));
+                    ROIwidth = std::min(imageWidth - ROIleft, (int) (2*adaptiveROIfactor*(newROIright - newROIleft)));
+                    ROIheight = std::min(imageHeight - ROItop, (int) (2*adaptiveROIfactor*(newROIright - newROIleft)));
+                }
+            }
+            else {
+                // Reset ROI
+                ROIleft = 0;
+                ROItop = 0;
+                ROIwidth = imageWidth;
+                ROIheight = imageHeight;
             }
             // Publish image with marker outlines
             if (drawMarkers){
