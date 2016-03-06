@@ -2,6 +2,7 @@
   <arg name="cameraName" default="/camera" />
   <arg name="markerSize" default="0.2032" />
   <arg name="drawMarkers" default="true" />
+  <arg name="adaptiveROI" default="true" />
   <arg name="image_frame_id" default="image" />
   <arg name="view" default="true" />
   
@@ -10,6 +11,7 @@
     <param name="camera" value="$(arg cameraName)" /> <!-- prefix for image_raw and camera_info topics -->
     <param name="markerSize" value="$(arg markerSize)" /> <!-- length of marker, in meters -->
     <param name="drawMarkers" value="$(arg drawMarkers)" /> <!-- publish image with markers highlighted if true -->
+    <param name="adaptiveROI" value="$(arg adaptiveROI)" /> <!-- adaptive ROI to increase frame rate -->
     <param name="image_frame_id" value="$(arg image_frame_id)" /> <!-- tf frame_id of image. Used as parent for publishing marker tf -->
   </node>
   
