@@ -66,7 +66,8 @@ public:
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
         
         //Adjust marker detector parameters
-        MDetector.setMinMaxSize(0.01,0.9);
+        if (adaptiveROI) {MDetector.setMinMaxSize(0.01,1.0);}
+        else {MDetector.setMinMaxSize(0.01,0.9);}
         
         // marker pose and center publishers
         markerPosePub = n.advertise<geometry_msgs::PoseStamped>("markers",10);
@@ -136,7 +137,7 @@ public:
         {
             cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
             
-            ros::Time start1 = ros::Time::now();
+            //ros::Time start1 = ros::Time::now();
             // Adaptive ROI
             if (adaptiveROI)
             {
@@ -147,15 +148,15 @@ public:
                 // draw ROI
                 cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
             }
-            ros::Time end1 = ros::Time::now();
-            std::cout << "delt1: " << (end1-start1).toSec() << std::endl;
+            //ros::Time end1 = ros::Time::now();
+            //std::cout << "delt1: " << (end1-start1).toSec() << std::endl;
             
-            ros::Time start2 = ros::Time::now();
+            //ros::Time start2 = ros::Time::now();
             //Detection of markers in the image passed
             vector<aruco::Marker> TheMarkers;
             MDetector.detect(imageROI,TheMarkers,camMat,distCoeffs,markerSize);
-            ros::Time end2 = ros::Time::now();
-            std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
+            //ros::Time end2 = ros::Time::now();
+            //std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
             
             
             // generate pose message and tf broadcast
@@ -170,7 +171,7 @@ public:
                 int newROIbottom = 0;
                 int newROIright = 0;
                 
-                ros::Time start3 = ros::Time::now();
+                //ros::Time start3 = ros::Time::now();
                 // Publish
                 for (unsigned int i=0; i<TheMarkers.size(); i++) {
                     //Common Info
@@ -231,10 +232,10 @@ public:
                     }
                     cv::rectangle(image,cv::Point2d(newROIleft,newROItop),cv::Point2d(newROIright-1,newROIbottom-1),cv::Scalar(255,0,0));
                 }
-                ros::Time end3 = ros::Time::now();
-                std::cout << "delt3: " << (end3-start3).toSec() << std::endl;
+                //ros::Time end3 = ros::Time::now();
+                //std::cout << "delt3: " << (end3-start3).toSec() << std::endl;
                 
-                ros::Time start4 = ros::Time::now();
+                //ros::Time start4 = ros::Time::now();
                 // Adjust ROI
                 if (adaptiveROI)
                 {
@@ -242,13 +243,14 @@ public:
                     camMat.at<double>(0,2) += ROIleft;
                     camMat.at<double>(1,2) += ROItop;
                     
-                    ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*(newROIright - newROIleft)));
-                    ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*(newROIbottom - newROItop)));
-                    ROIwidth = std::min(imageWidth - ROIleft, (int) ((1+2*adaptiveROIfactor)*(newROIright - newROIleft)));
-                    ROIheight = std::min(imageHeight - ROItop, (int) ((1+2*adaptiveROIfactor)*(newROIbottom - newROItop)));
+                    double maxWidthHeight = std::max(newROIright - newROIleft,newROIbottom - newROItop);
+                    ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*maxWidthHeight));
+                    ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*maxWidthHeight));
+                    ROIwidth = std::min(imageWidth - ROIleft, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
+                    ROIheight = std::min(imageHeight - ROItop, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
                 }
-                ros::Time end4 = ros::Time::now();
-                std::cout << "delt4: " << (end4-start4).toSec() << std::endl;
+                //ros::Time end4 = ros::Time::now();
+                //std::cout << "delt4: " << (end4-start4).toSec() << std::endl;
             }
             else {
                 // Reset ROI
@@ -257,18 +259,18 @@ public:
                 ROIwidth = imageWidth;
                 ROIheight = imageHeight;
             }
-            ros::Time start5 = ros::Time::now();
+            //ros::Time start5 = ros::Time::now();
             // Publish image with marker outlines
             if (drawMarkers){
                 markerImagePub.publish(cv_ptr->toImageMsg());
             }
-            ros::Time end5 = ros::Time::now();
-            std::cout << "delt5: " << (end5-start5).toSec() << std::endl;
+            //ros::Time end5 = ros::Time::now();
+            //std::cout << "delt5: " << (end5-start5).toSec() << std::endl;
         }
         catch (std::exception &ex){
             cout<<"Exception :"<<ex.what()<<endl;
         }
-        std::cout << std::endl << std::endl << std::endl;
+        //std::cout << std::endl << std::endl << std::endl;
     }
 
 
