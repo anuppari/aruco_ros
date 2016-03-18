@@ -6,6 +6,7 @@
 #include <sensor_msgs/Image.h>
 #include <tf/transform_broadcaster.h>
 #include <aruco_ros/Center.h>
+#include <aruco_ros/SpecialMarkers.h>
 #include <image_transport/image_transport.h>
 #include <image_geometry/pinhole_camera_model.h>
 
@@ -40,6 +41,7 @@ class SubscribeAndPublish
     std::string cameraName;
     std::string image_frame_id;
     aruco::MarkerDetector MDetector;
+    ros::ServiceServer service;
     
     // adaptive ROI
     bool adaptiveROI;
@@ -54,6 +56,8 @@ class SubscribeAndPublish
     int imageHeight;
     cv::Mat camMat;
     cv::Mat distCoeffs;
+    
+    std::map<int, bool> specialMarkersFound;
 public:
     SubscribeAndPublish() : it(n)
     {
@@ -64,6 +68,9 @@ public:
         nh.param<double>("markerSize", markerSize, 0.2032);
         nh.param<bool>("drawMarkers", drawMarkers, true);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
+        
+        // Start service
+        service = nh.advertiseService("setSpecialMarkers", &SubscribeAndPublish::setSpecialMarkers,this);
         
         //Adjust marker detector parameters
         if (adaptiveROI) {MDetector.setMinMaxSize(0.01,1.0);}
@@ -158,6 +165,11 @@ public:
             //ros::Time end2 = ros::Time::now();
             //std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
             
+            // reset list of found special markers
+            for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
+            {
+                it->second = false;
+            }
             
             // generate pose message and tf broadcast
             if (TheMarkers.size()!=0){
@@ -177,6 +189,13 @@ public:
                     //Common Info
                     char buffer[4];
                     sprintf(buffer,"%d",TheMarkers[i].id);
+                    
+                    // Update special marker list
+                    std::map<int,bool>::iterator it = specialMarkersFound.find(TheMarkers[i].id);
+                    if (it != specialMarkersFound.end())
+                    {
+                        it->second = true;
+                    }
                     
                     //Marker pose
                     cv::Mat tvec = TheMarkers[i].Tvec;
@@ -215,6 +234,7 @@ public:
                     centerMsg.header.frame_id = buffer;
                     centerMsg.x = cent.x + ROIleft;
                     centerMsg.y = cent.y + ROItop;
+                    centerMsg.found = true;
                     markerPointPub.publish(centerMsg);
                     
                     // Draw marker on image
@@ -266,11 +286,41 @@ public:
             }
             //ros::Time end5 = ros::Time::now();
             //std::cout << "delt5: " << (end5-start5).toSec() << std::endl;
+            
+            // Send out signal if special markers not found
+            for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
+            {
+                if (it->second == false)
+                {
+                    //Publish marker centers
+                    char buffer[4];
+                    sprintf(buffer,"%d",it->first);
+                    aruco_ros::Center centerMsg;
+                    centerMsg.header.stamp = imageMsg->header.stamp;
+                    centerMsg.header.frame_id = buffer;
+                    centerMsg.found = false;
+                    markerPointPub.publish(centerMsg);
+                }
+            }
         }
         catch (std::exception &ex){
             cout<<"Exception :"<<ex.what()<<endl;
         }
         //std::cout << std::endl << std::endl << std::endl;
+    }
+    
+    bool setSpecialMarkers(aruco_ros::SpecialMarkers::Request &req,aruco_ros::SpecialMarkers::Response &resp)
+    {
+        // reset map of special markers
+        if (req.reset) { specialMarkersFound.clear(); }
+        
+        // Initialize list of new special markers
+        for (std::vector<int>::iterator it = req.markerIDs.begin(); it != req.markerIDs.end(); ++it)
+        {
+            specialMarkersFound[*it] = false;
+        }
+        
+        return true;
     }
 
 

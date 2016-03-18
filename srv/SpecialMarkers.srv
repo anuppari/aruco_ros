@@ -1,0 +1,3 @@
+int32[] markerIDs
+bool reset
+---
