@@ -68,6 +68,13 @@ public:
         nh.param<double>("markerSize", markerSize, 0.2032);
         nh.param<bool>("drawMarkers", drawMarkers, true);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
+        camMat = cv::Mat();
+        distCoeffs = cv::Mat();
+        
+        // Get camera parameters
+        std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
+        gotCamParam = false;
+        camInfoSub = n.subscribe(cameraName+"/camera_info",1,&SubscribeAndPublish::camInfoCB,this);
         
         // Start service
         service = nh.advertiseService("setSpecialMarkers", &SubscribeAndPublish::setSpecialMarkers,this);
@@ -85,23 +92,8 @@ public:
             markerImagePub = n.advertise<sensor_msgs::Image>("markerImage",10);
         }
         
-        // Get camera parameters
-        std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
-        gotCamParam = false;
-        camInfoSub = nh.subscribe(cameraName+"/camera_info",1,&SubscribeAndPublish::camInfoCB,this);
-        ROS_DEBUG("Waiting for camera parameters ...");
-        do {
-            ros::spinOnce();
-            ros::Duration(0.1).sleep();
-        } while (!(ros::isShuttingDown()) and !gotCamParam);
-        ROS_DEBUG("Got camera parameters");
-        
-        // Set image ROI
+        // Set ROI parameters
         adaptiveROIfactor = 0.25;
-        ROIleft = 0;
-        ROItop = 0;
-        ROIwidth = imageWidth;
-        ROIheight = imageHeight;
         
         // Image and camera parameter subscribers
         imageSub = it.subscribe(cameraName+"/image_raw", 1, &SubscribeAndPublish::imageCb,this);
@@ -115,6 +107,11 @@ public:
         cam_model.fromCameraInfo(camInfoMsg);
         cv::Mat camMatCV = cv::Mat(cam_model.fullIntrinsicMatrix());
         camMatCV.convertTo(camMat,CV_64F);
+        if (cv::countNonZero(camMat) < 1) // check if camera parameters are default values used when not set by camera driver, and serve empty Mat to detector
+        {
+            camMat = cv::Mat();
+            distCoeffs = cv::Mat();
+        }
         imageHeight = camInfoMsg->height;
         imageWidth = camInfoMsg->width;
         
@@ -142,18 +139,32 @@ public:
         
         try
         {
+            // Reset ROI on first call
+            if (!(0 <= ROIleft && 0 <= ROIwidth && ROIleft + ROIwidth <= image.cols && 0 <= ROItop && 0 <= ROIheight && ROItop + ROIheight <= image.rows))
+            {
+                imageWidth = image.cols;
+                imageHeight = image.rows;
+                
+                ROIleft = 0;
+                ROItop = 0;
+                ROIwidth = imageWidth;
+                ROIheight = imageHeight;
+            }
             cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
             
             //ros::Time start1 = ros::Time::now();
             // Adaptive ROI
             if (adaptiveROI)
             {
-                // Adjust camera matrix
-                camMat.at<double>(0,2) -= ROIleft;
-                camMat.at<double>(1,2) -= ROItop;
+                if (gotCamParam)
+                {
+                    // Adjust camera matrix
+                    camMat.at<double>(0,2) -= ROIleft;
+                    camMat.at<double>(1,2) -= ROItop;
+                }
                 
                 // draw ROI
-                //cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+                cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
             }
             //ros::Time end1 = ros::Time::now();
             //std::cout << "delt1: " << (end1-start1).toSec() << std::endl;
@@ -197,35 +208,38 @@ public:
                         it->second = true;
                     }
                     
-                    //Marker pose
-                    cv::Mat tvec = TheMarkers[i].Tvec;
-                    cv::Mat quat(4,1,CV_32FC1);
-                    rvec2quat(TheMarkers[i].Rvec,quat);
-                    
-                    //Broadcast tf
-                    tf::Quaternion q(quat.at<float>(1,0),quat.at<float>(2,0),quat.at<float>(3,0),quat.at<float>(0,0));
-                    tf::Vector3 vec(tvec.at<float>(0,0),tvec.at<float>(1,0),tvec.at<float>(2,0));
-                    tf::Transform transf(q,vec);
-                    /*
-                    char frameName[16];
-                    sprintf(frameName,"marker%d",TheMarkers[i].id);
-                    */
-                    tfBr.sendTransform(tf::StampedTransform(transf,timeNow,image_frame_id,std::string("marker")+buffer));
-                    
-                    //Publish marker pose
-                    geometry_msgs::PoseStamped poseMsg;
-                    poseMsg.header.stamp = timeNow;
-                    poseMsg.header.frame_id = buffer;
-                    
-                    poseMsg.pose.position.x = tvec.at<float>(0,0);
-                    poseMsg.pose.position.y = tvec.at<float>(1,0);
-                    poseMsg.pose.position.z = tvec.at<float>(2,0);
-                    
-                    poseMsg.pose.orientation.w = quat.at<float>(0,0);
-                    poseMsg.pose.orientation.x = quat.at<float>(1,0);
-                    poseMsg.pose.orientation.y = quat.at<float>(2,0);
-                    poseMsg.pose.orientation.z = quat.at<float>(3,0);
-                    markerPosePub.publish(poseMsg);
+                    if (gotCamParam)
+                    {
+                        //Marker pose
+                        cv::Mat tvec = TheMarkers[i].Tvec;
+                        cv::Mat quat(4,1,CV_32FC1);
+                        rvec2quat(TheMarkers[i].Rvec,quat);
+                        
+                        //Broadcast tf
+                        tf::Quaternion q(quat.at<float>(1,0),quat.at<float>(2,0),quat.at<float>(3,0),quat.at<float>(0,0));
+                        tf::Vector3 vec(tvec.at<float>(0,0),tvec.at<float>(1,0),tvec.at<float>(2,0));
+                        tf::Transform transf(q,vec);
+                        /*
+                        char frameName[16];
+                        sprintf(frameName,"marker%d",TheMarkers[i].id);
+                        */
+                        tfBr.sendTransform(tf::StampedTransform(transf,timeNow,image_frame_id,std::string("marker")+buffer));
+                        
+                        //Publish marker pose
+                        geometry_msgs::PoseStamped poseMsg;
+                        poseMsg.header.stamp = timeNow;
+                        poseMsg.header.frame_id = buffer;
+                        
+                        poseMsg.pose.position.x = tvec.at<float>(0,0);
+                        poseMsg.pose.position.y = tvec.at<float>(1,0);
+                        poseMsg.pose.position.z = tvec.at<float>(2,0);
+                        
+                        poseMsg.pose.orientation.w = quat.at<float>(0,0);
+                        poseMsg.pose.orientation.x = quat.at<float>(1,0);
+                        poseMsg.pose.orientation.y = quat.at<float>(2,0);
+                        poseMsg.pose.orientation.z = quat.at<float>(3,0);
+                        markerPosePub.publish(poseMsg);
+                    }
                     
                     //Publish marker centers
                     cv::Point2f cent = TheMarkers[i].getCenter();
@@ -259,11 +273,16 @@ public:
                 // Adjust ROI
                 if (adaptiveROI)
                 {
-                    // Reset cam matrix
-                    camMat.at<double>(0,2) += ROIleft;
-                    camMat.at<double>(1,2) += ROItop;
+                    if (gotCamParam)
+                    {
+                        // Reset cam matrix
+                        camMat.at<double>(0,2) += ROIleft;
+                        camMat.at<double>(1,2) += ROItop;
+                    }
                     
                     double maxWidthHeight = std::max(newROIright - newROIleft,newROIbottom - newROItop);
+                    newROIleft = (int) (newROIleft - (maxWidthHeight - (newROIright-newROIleft))/2.0);
+                    newROItop = (int) (newROItop - (maxWidthHeight - (newROIbottom-newROItop))/2.0);
                     ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*maxWidthHeight));
                     ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*maxWidthHeight));
                     ROIwidth = std::min(imageWidth - ROIleft, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
