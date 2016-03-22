@@ -153,7 +153,7 @@ public:
                 camMat.at<double>(1,2) -= ROItop;
                 
                 // draw ROI
-                cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+                //cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
             }
             //ros::Time end1 = ros::Time::now();
             //std::cout << "delt1: " << (end1-start1).toSec() << std::endl;
@@ -250,7 +250,7 @@ public:
                         newROIbottom = std::max((int) TheMarkers[i][j].y + ROItop,newROIbottom);
                         //cv::circle(image,cv::Point2d(TheMarkers[i][j].x + ROIleft,TheMarkers[i][j].y + ROItop),10,cv::Scalar(255,0,0),-1);
                     }
-                    cv::rectangle(image,cv::Point2d(newROIleft,newROItop),cv::Point2d(newROIright-1,newROIbottom-1),cv::Scalar(255,0,0));
+                    //cv::rectangle(image,cv::Point2d(newROIleft,newROItop),cv::Point2d(newROIright-1,newROIbottom-1),cv::Scalar(255,0,0));
                 }
                 //ros::Time end3 = ros::Time::now();
                 //std::cout << "delt3: " << (end3-start3).toSec() << std::endl;
