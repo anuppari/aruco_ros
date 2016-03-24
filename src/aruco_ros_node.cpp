@@ -151,6 +151,7 @@ public:
                 ROIheight = imageHeight;
             }
             cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
+            cv::Mat camMatROI = camMat.clone();
             
             //ros::Time start1 = ros::Time::now();
             // Adaptive ROI
@@ -159,8 +160,8 @@ public:
                 if (gotCamParam)
                 {
                     // Adjust camera matrix
-                    camMat.at<double>(0,2) -= ROIleft;
-                    camMat.at<double>(1,2) -= ROItop;
+                    camMatROI.at<double>(0,2) -= ROIleft;
+                    camMatROI.at<double>(1,2) -= ROItop;
                 }
                 
                 // draw ROI
@@ -172,7 +173,7 @@ public:
             //ros::Time start2 = ros::Time::now();
             //Detection of markers in the image passed
             vector<aruco::Marker> TheMarkers;
-            MDetector.detect(imageROI,TheMarkers,camMat,distCoeffs,markerSize);
+            MDetector.detect(imageROI,TheMarkers,camMatROI,distCoeffs,markerSize);
             //ros::Time end2 = ros::Time::now();
             //std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
             
@@ -273,12 +274,13 @@ public:
                 // Adjust ROI
                 if (adaptiveROI)
                 {
-                    if (gotCamParam)
-                    {
-                        // Reset cam matrix
-                        camMat.at<double>(0,2) += ROIleft;
-                        camMat.at<double>(1,2) += ROItop;
-                    }
+                    //if (gotCamParam)
+                    //{
+                        //// Reset cam matrix
+                        ////camMat.at<double>(0,2) += ROIleft;
+                        ////camMat.at<double>(1,2) += ROItop;
+                        //camMat.col(2) = camMatOriginal.col(2);
+                    //}
                     
                     double maxWidthHeight = std::max(newROIright - newROIleft,newROIbottom - newROItop);
                     newROIleft = (int) (newROIleft - (maxWidthHeight - (newROIright-newROIleft))/2.0);
