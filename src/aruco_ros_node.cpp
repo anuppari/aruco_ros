@@ -58,6 +58,10 @@ class SubscribeAndPublish
     cv::Mat distCoeffs;
     
     std::map<int, bool> specialMarkersFound;
+    
+    // debug
+    //cv::Mat lastImage;
+    double lastImageTime;
 public:
     SubscribeAndPublish() : it(n)
     {
@@ -70,6 +74,11 @@ public:
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
         camMat = cv::Mat();
         distCoeffs = cv::Mat();
+        //lastImage = cv::Mat();
+        
+        std::cout << "camMat: " << camMat << std::endl;
+        std::cout << "distCoeffs: " << distCoeffs << std::endl;
+        //std::cout << "lastImage: " << lastImage << std::endl;
         
         // Get camera parameters
         std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
@@ -107,6 +116,9 @@ public:
         cam_model.fromCameraInfo(camInfoMsg);
         cv::Mat camMatCV = cv::Mat(cam_model.fullIntrinsicMatrix());
         camMatCV.convertTo(camMat,CV_64F);
+        
+        // CODE BREAKS IF USING DIST COEFFS. COMMENT OUT NEXT LINE TO FIX
+        cam_model.distortionCoeffs().convertTo(distCoeffs,CV_64F);
         if (cv::countNonZero(camMat) < 1) // check if camera parameters are default values used when not set by camera driver, and serve empty Mat to detector
         {
             camMat = cv::Mat();
@@ -173,6 +185,8 @@ public:
             //ros::Time start2 = ros::Time::now();
             //Detection of markers in the image passed
             vector<aruco::Marker> TheMarkers;
+            std::cout << "camMat: " << camMat << std::endl;
+            std::cout << "distCoeffs: " << distCoeffs << std::endl;
             MDetector.detect(imageROI,TheMarkers,camMatROI,distCoeffs,markerSize);
             //ros::Time end2 = ros::Time::now();
             //std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
@@ -188,6 +202,18 @@ public:
                 
                 //Get image timestamp for subsequent publications
                 ros::Time timeNow = imageMsg->header.stamp;
+                std::cout.precision(18);
+                if (timeNow.toSec() == lastImageTime)
+                {
+                    std::cout << "arucolastImageTime: " << lastImageTime << std::endl;
+                    //std::cout << "arucoTimeNow: " << timeNow.toSec() << std::endl;
+                    // save this and last image
+                    //cv::imwrite("~/lastImage.jpg", lastImage);
+                    cv::imwrite("~/image.png", image);
+                }
+                lastImageTime = timeNow.toSec();
+                //lastImage = image.clone();
+                
                 
                 // reset ROI
                 int newROIleft = imageWidth;
