@@ -2,7 +2,7 @@
   <arg name="cameraName" default="/camera" />
   <arg name="markerSize" default="0.2032" />
   <arg name="drawMarkers" default="true" />
-  <arg name="adaptiveROI" default="false" />
+  <arg name="adaptiveROI" default="true" />
   <arg name="image_frame_id" default="image" />
   <arg name="view" default="true" />
   

@@ -4,10 +4,10 @@ project(aruco_ros)
 ## Find catkin macros and libraries
 ## if COMPONENTS list like find_package(catkin REQUIRED COMPONENTS xyz)
 ## is used, also find other catkin packages
-set(CMAKE_MODULE_PATH /usr/local/lib/cmake) # Adds proper path for Findaruco.cmake, since default aruco install location is wrong
+#set(CMAKE_MODULE_PATH /usr/local/lib/cmake) # Adds proper path for Findaruco.cmake, since default aruco install location is wrong
 message( STATUS "CMAKE_MODULE_PATH: " ${CMAKE_MODULE_PATH})
 find_package(OpenCV REQUIRED)
-find_package(aruco REQUIRED)
+#find_package(aruco REQUIRED)
 find_package(catkin REQUIRED COMPONENTS
   roscpp
   cv_bridge
@@ -105,10 +105,10 @@ catkin_package(
 include_directories(
   ${catkin_INCLUDE_DIRS}
   ${OpenCV_INCLUDE_DIRS}
-  ${aruco_INCLUDE_DIRS}
+  #${aruco_INCLUDE_DIRS}
 )
 message(STATUS "OpenCV_INCLUDE_DIRS: " ${OpenCV_INCLUDE_DIRS})
-message(STATUS "aruco_INCLUDE_DIRS: " ${aruco_INCLUDE_DIRS})
+#message(STATUS "aruco_INCLUDE_DIRS: " ${aruco_INCLUDE_DIRS})
 
 ## Declare a cpp library
 # add_library(aruco_ros
@@ -128,7 +128,7 @@ add_dependencies(aruco_ros_node aruco_ros_generate_messages_cpp)
 target_link_libraries(aruco_ros_node
   ${catkin_LIBRARIES}
   ${Opencv_LIBRARIES}
-  ${aruco_LIBS}
+  #${aruco_LIBS}
 )
 #target_link_libraries(blob_node
 #  ${catkin_LIBRARIES}
