@@ -4,28 +4,20 @@
 #include <sensor_msgs/image_encodings.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
-#include <tf/transform_broadcaster.h>
 #include <aruco_ros/Center.h>
 #include <aruco_ros/SpecialMarkers.h>
+#include <tf/transform_broadcaster.h>
 #include <image_transport/image_transport.h>
 #include <image_geometry/pinhole_camera_model.h>
 
-#include <typeinfo>
-#include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
-#include <opencv2/calib3d.hpp>
-#include <iostream>
+//#include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
+#include <opencv2/calib3d/calib3d.hpp>
+#include <opencv2/aruco.hpp>
 #include <stdio.h>
-#include <fstream>
-#include <sstream>
 #include <math.h>
-#include <aruco/aruco.h>
-//#include <aruco/cvdrawingutils.h>
 
-void rvec2quat(cv::Mat&, cv::Mat&);
-
-double markerSize;
-bool drawMarkers;
+void rvec2quat(cv::Vec3d&, tf::Quaternion&);
 
 // need a class in order publish in the callback
 class SubscribeAndPublish
@@ -40,8 +32,13 @@ class SubscribeAndPublish
     tf::TransformBroadcaster tfBr;
     std::string cameraName;
     std::string image_frame_id;
-    aruco::MarkerDetector MDetector;
     ros::ServiceServer service;
+    
+    // Parameters
+    double markerSize;
+    bool drawMarkers;
+    cv::Ptr<cv::aruco::Dictionary> markerDictionary;
+    cv::Ptr<cv::aruco::DetectorParameters> detectorParams;
     
     // adaptive ROI
     bool adaptiveROI;
@@ -72,15 +69,13 @@ public:
         nh.param<double>("markerSize", markerSize, 0.2032);
         nh.param<bool>("drawMarkers", drawMarkers, true);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
-        camMat = cv::Mat();
-        distCoeffs = cv::Mat();
-        //lastImage = cv::Mat();
         
-        std::cout << "camMat: " << camMat << std::endl;
-        std::cout << "distCoeffs: " << distCoeffs << std::endl;
-        //std::cout << "lastImage: " << lastImage << std::endl;
+        // Set ROI parameters
+        adaptiveROIfactor = 0.25;
         
         // Get camera parameters
+        camMat = cv::Mat();
+        distCoeffs = cv::Mat();
         std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
         gotCamParam = false;
         camInfoSub = n.subscribe(cameraName+"/camera_info",1,&SubscribeAndPublish::camInfoCB,this);
@@ -89,8 +84,9 @@ public:
         service = nh.advertiseService("setSpecialMarkers", &SubscribeAndPublish::setSpecialMarkers,this);
         
         //Adjust marker detector parameters
-        if (adaptiveROI) {MDetector.setMinMaxSize(0.01,1.0);}
-        else {MDetector.setMinMaxSize(0.01,0.9);}
+        markerDictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_ORIGINAL);
+        detectorParams = cv::aruco::DetectorParameters::create();
+        detectorParams->doCornerRefinement = true;
         
         // marker pose and center publishers
         markerPosePub = n.advertise<geometry_msgs::PoseStamped>("markers",10);
@@ -100,9 +96,6 @@ public:
         if (drawMarkers){
             markerImagePub = n.advertise<sensor_msgs::Image>("markerImage",10);
         }
-        
-        // Set ROI parameters
-        adaptiveROIfactor = 0.25;
         
         // Image and camera parameter subscribers
         imageSub = it.subscribe(cameraName+"/image_raw", 1, &SubscribeAndPublish::imageCb,this);
@@ -116,8 +109,6 @@ public:
         cam_model.fromCameraInfo(camInfoMsg);
         cv::Mat camMatCV = cv::Mat(cam_model.fullIntrinsicMatrix());
         camMatCV.convertTo(camMat,CV_64F);
-        
-        // CODE BREAKS IF USING DIST COEFFS. COMMENT OUT NEXT LINE TO FIX
         cam_model.distortionCoeffs().convertTo(distCoeffs,CV_64F);
         if (cv::countNonZero(camMat) < 1) // check if camera parameters are default values used when not set by camera driver, and serve empty Mat to detector
         {
@@ -134,10 +125,9 @@ public:
     
     void imageCb(const sensor_msgs::ImageConstPtr& imageMsg)
     {
-        //Convert to opencv image
+        // Convert to opencv image
         cv_bridge::CvImagePtr cv_ptr;
         cv::Mat image;
-        
         try
         {
             cv_ptr = cv_bridge::toCvCopy(imageMsg, sensor_msgs::image_encodings::BGR8);
@@ -149,211 +139,175 @@ public:
             return;
         }
         
-        try
+        // Reset ROI on first call
+        if (!(0 <= ROIleft && 0 <= ROIwidth && ROIleft + ROIwidth <= image.cols && 0 <= ROItop && 0 <= ROIheight && ROItop + ROIheight <= image.rows))
         {
-            // Reset ROI on first call
-            if (!(0 <= ROIleft && 0 <= ROIwidth && ROIleft + ROIwidth <= image.cols && 0 <= ROItop && 0 <= ROIheight && ROItop + ROIheight <= image.rows))
-            {
-                imageWidth = image.cols;
-                imageHeight = image.rows;
-                
-                ROIleft = 0;
-                ROItop = 0;
-                ROIwidth = imageWidth;
-                ROIheight = imageHeight;
-            }
-            cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
-            cv::Mat camMatROI = camMat.clone();
+            imageWidth = image.cols;
+            imageHeight = image.rows;
             
-            //ros::Time start1 = ros::Time::now();
-            // Adaptive ROI
-            if (adaptiveROI)
+            ROIleft = 0;
+            ROItop = 0;
+            ROIwidth = imageWidth;
+            ROIheight = imageHeight;
+        }
+        
+        // Get ROI
+        cv::Mat imageROI = image(cv::Rect(ROIleft,ROItop,ROIwidth,ROIheight));
+        cv::Mat camMatROI = camMat.clone();
+        
+        // Adaptive ROI
+        if (adaptiveROI)
+        {
+            if (gotCamParam)
             {
+                // Adjust camera matrix
+                camMatROI.at<double>(0,2) -= ROIleft;
+                camMatROI.at<double>(1,2) -= ROItop;
+            }
+            
+            // draw ROI
+            cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+        }
+        
+        // Detect markers
+        std::vector< std::vector<cv::Point2f> > markerCorners;
+        std::vector<int> markerIDs;
+        std::vector<cv::Vec3d> rvecs, tvecs;
+        cv::aruco::detectMarkers(imageROI,markerDictionary,markerCorners,markerIDs,detectorParams);
+        
+        // Determine pose, draw markers, publish pose and tf messages
+        if (markerIDs.size() > 0)
+        {
+            //Get image timestamp for subsequent publications
+            ros::Time timeNow = imageMsg->header.stamp;
+            
+            // Determine pose
+            if (gotCamParam) { cv::aruco::estimatePoseSingleMarkers(markerCorners,markerSize,camMatROI,distCoeffs,rvecs,tvecs); }
+            
+            // Reset temp variables for new ROI
+            int newROIleft = imageWidth;
+            int newROItop = imageHeight;
+            int newROIbottom = 0;
+            int newROIright = 0;
+                
+            for (int i = 0; i < markerIDs.size(); i++)
+            {
+                // Common Info
+                char buffer[4];
+                sprintf(buffer,"%d",markerIDs[i]);
+                
+                // Update special marker list
+                std::map<int,bool>::iterator it = specialMarkersFound.find(markerIDs[i]);
+                if (it != specialMarkersFound.end())
+                {
+                    it->second = true;
+                }
+                
+                // Publish marker centers
+                cv::Point2f cent(0,0);
+                for (int j = 0; j < 4; j++)
+                {
+                    cent += markerCorners[i][j];
+                }
+                cent *= 0.25;
+                aruco_ros::Center centerMsg;
+                centerMsg.header.stamp = timeNow;
+                centerMsg.header.frame_id = buffer;
+                centerMsg.x = cent.x + ROIleft;
+                centerMsg.y = cent.y + ROItop;
+                centerMsg.found = true;
+                markerPointPub.publish(centerMsg);
+                cv::circle(imageROI,cent,10,cv::Scalar(255,0,0),-1);
+                
+                // Publish pose
                 if (gotCamParam)
                 {
-                    // Adjust camera matrix
-                    camMatROI.at<double>(0,2) -= ROIleft;
-                    camMatROI.at<double>(1,2) -= ROItop;
+                    //Marker pose
+                    tf::Quaternion quat;
+                    rvec2quat(rvecs[i],quat);
+                    //tf::Quaternion q(quat.at<double>(1,0),quat.at<double>(2,0),quat.at<double>(3,0),quat.at<double>(0,0));
+                    tf::Quaternion qComp(0,0,std::sqrt(2.0)/2.0,-std::sqrt(2.0)/2.0);
+                    quat *= qComp; // compensate for change in convention between Aruco and OpenCV/Aruco
+                    
+                    //Broadcast tf
+                    tf::Vector3 vec(tvecs[i][0],tvecs[i][1],tvecs[i][2]);
+                    tf::Transform transf(quat,vec);
+                    tfBr.sendTransform(tf::StampedTransform(transf,timeNow,image_frame_id,std::string("marker")+buffer));
+                    
+                    //Publish marker pose
+                    geometry_msgs::PoseStamped poseMsg;
+                    poseMsg.header.stamp = timeNow;
+                    poseMsg.header.frame_id = buffer;
+                    
+                    poseMsg.pose.position.x = tvecs[i][0];
+                    poseMsg.pose.position.y = tvecs[i][1];
+                    poseMsg.pose.position.z = tvecs[i][2];
+                    
+                    poseMsg.pose.orientation.x = quat.getX();
+                    poseMsg.pose.orientation.y = quat.getY();
+                    poseMsg.pose.orientation.z = quat.getZ();
+                    poseMsg.pose.orientation.w = quat.getW();
+                    markerPosePub.publish(poseMsg);
                 }
                 
-                // draw ROI
-                cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+                // Determine new ROI
+                for (unsigned int j=0; j<4; j++) {
+                    newROIleft = std::min((int) markerCorners[i][j].x + ROIleft,newROIleft);
+                    newROItop = std::min((int) markerCorners[i][j].y + ROItop,newROItop);
+                    newROIright = std::max((int) markerCorners[i][j].x + ROIleft,newROIright);
+                    newROIbottom = std::max((int) markerCorners[i][j].y + ROItop,newROIbottom);
+                    //cv::circle(image,cv::Point2d(TheMarkers[i][j].x + ROIleft,TheMarkers[i][j].y + ROItop),10,cv::Scalar(255,0,0),-1);
+                }
             }
-            //ros::Time end1 = ros::Time::now();
-            //std::cout << "delt1: " << (end1-start1).toSec() << std::endl;
             
-            //ros::Time start2 = ros::Time::now();
-            //Detection of markers in the image passed
-            vector<aruco::Marker> TheMarkers;
-            std::cout << "camMat: " << camMat << std::endl;
-            std::cout << "distCoeffs: " << distCoeffs << std::endl;
-            MDetector.detect(imageROI,TheMarkers,camMatROI,distCoeffs,markerSize);
-            //ros::Time end2 = ros::Time::now();
-            //std::cout << "delt2: " << (end2-start2).toSec() << std::endl;
-            
-            // reset list of found special markers
-            for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
+            // Update ROI
+            if (adaptiveROI)
             {
-                it->second = false;
-            }
-            
-            // generate pose message and tf broadcast
-            if (TheMarkers.size()!=0){
-                
-                //Get image timestamp for subsequent publications
-                ros::Time timeNow = imageMsg->header.stamp;
-                std::cout.precision(18);
-                if (timeNow.toSec() == lastImageTime)
-                {
-                    std::cout << "arucolastImageTime: " << lastImageTime << std::endl;
-                    //std::cout << "arucoTimeNow: " << timeNow.toSec() << std::endl;
-                    // save this and last image
-                    //cv::imwrite("~/lastImage.jpg", lastImage);
-                    cv::imwrite("~/image.png", image);
-                }
-                lastImageTime = timeNow.toSec();
-                //lastImage = image.clone();
-                
-                
-                // reset ROI
-                int newROIleft = imageWidth;
-                int newROItop = imageHeight;
-                int newROIbottom = 0;
-                int newROIright = 0;
-                
-                //ros::Time start3 = ros::Time::now();
-                // Publish
-                for (unsigned int i=0; i<TheMarkers.size(); i++) {
-                    //Common Info
-                    char buffer[4];
-                    sprintf(buffer,"%d",TheMarkers[i].id);
-                    
-                    // Update special marker list
-                    std::map<int,bool>::iterator it = specialMarkersFound.find(TheMarkers[i].id);
-                    if (it != specialMarkersFound.end())
-                    {
-                        it->second = true;
-                    }
-                    
-                    if (gotCamParam)
-                    {
-                        //Marker pose
-                        cv::Mat tvec = TheMarkers[i].Tvec;
-                        cv::Mat quat(4,1,CV_32FC1);
-                        rvec2quat(TheMarkers[i].Rvec,quat);
-                        
-                        //Broadcast tf
-                        tf::Quaternion q(quat.at<float>(1,0),quat.at<float>(2,0),quat.at<float>(3,0),quat.at<float>(0,0));
-                        tf::Vector3 vec(tvec.at<float>(0,0),tvec.at<float>(1,0),tvec.at<float>(2,0));
-                        tf::Transform transf(q,vec);
-                        /*
-                        char frameName[16];
-                        sprintf(frameName,"marker%d",TheMarkers[i].id);
-                        */
-                        tfBr.sendTransform(tf::StampedTransform(transf,timeNow,image_frame_id,std::string("marker")+buffer));
-                        
-                        //Publish marker pose
-                        geometry_msgs::PoseStamped poseMsg;
-                        poseMsg.header.stamp = timeNow;
-                        poseMsg.header.frame_id = buffer;
-                        
-                        poseMsg.pose.position.x = tvec.at<float>(0,0);
-                        poseMsg.pose.position.y = tvec.at<float>(1,0);
-                        poseMsg.pose.position.z = tvec.at<float>(2,0);
-                        
-                        poseMsg.pose.orientation.w = quat.at<float>(0,0);
-                        poseMsg.pose.orientation.x = quat.at<float>(1,0);
-                        poseMsg.pose.orientation.y = quat.at<float>(2,0);
-                        poseMsg.pose.orientation.z = quat.at<float>(3,0);
-                        markerPosePub.publish(poseMsg);
-                    }
-                    
-                    //Publish marker centers
-                    cv::Point2f cent = TheMarkers[i].getCenter();
-                    aruco_ros::Center centerMsg;
-                    centerMsg.header.stamp = timeNow;
-                    centerMsg.header.frame_id = buffer;
-                    centerMsg.x = cent.x + ROIleft;
-                    centerMsg.y = cent.y + ROItop;
-                    centerMsg.found = true;
-                    markerPointPub.publish(centerMsg);
-                    
-                    // Draw marker on image
-                    if (drawMarkers){
-                        TheMarkers[i].draw(imageROI,cv::Scalar(0,0,255));
-                    }
-                    
-                    // Adaptive ROI
-                    for (unsigned int j=0; j<4; j++) {
-                        newROIleft = std::min((int) TheMarkers[i][j].x + ROIleft,newROIleft);
-                        newROItop = std::min((int) TheMarkers[i][j].y + ROItop,newROItop);
-                        newROIright = std::max((int) TheMarkers[i][j].x + ROIleft,newROIright);
-                        newROIbottom = std::max((int) TheMarkers[i][j].y + ROItop,newROIbottom);
-                        //cv::circle(image,cv::Point2d(TheMarkers[i][j].x + ROIleft,TheMarkers[i][j].y + ROItop),10,cv::Scalar(255,0,0),-1);
-                    }
-                    //cv::rectangle(image,cv::Point2d(newROIleft,newROItop),cv::Point2d(newROIright-1,newROIbottom-1),cv::Scalar(255,0,0));
-                }
-                //ros::Time end3 = ros::Time::now();
-                //std::cout << "delt3: " << (end3-start3).toSec() << std::endl;
-                
-                //ros::Time start4 = ros::Time::now();
-                // Adjust ROI
-                if (adaptiveROI)
-                {
-                    //if (gotCamParam)
-                    //{
-                        //// Reset cam matrix
-                        ////camMat.at<double>(0,2) += ROIleft;
-                        ////camMat.at<double>(1,2) += ROItop;
-                        //camMat.col(2) = camMatOriginal.col(2);
-                    //}
-                    
-                    double maxWidthHeight = std::max(newROIright - newROIleft,newROIbottom - newROItop);
-                    newROIleft = (int) (newROIleft - (maxWidthHeight - (newROIright-newROIleft))/2.0);
-                    newROItop = (int) (newROItop - (maxWidthHeight - (newROIbottom-newROItop))/2.0);
-                    ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*maxWidthHeight));
-                    ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*maxWidthHeight));
-                    ROIwidth = std::min(imageWidth - ROIleft, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
-                    ROIheight = std::min(imageHeight - ROItop, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
-                }
-                //ros::Time end4 = ros::Time::now();
-                //std::cout << "delt4: " << (end4-start4).toSec() << std::endl;
-            }
-            else {
-                // Reset ROI
-                ROIleft = 0;
-                ROItop = 0;
-                ROIwidth = imageWidth;
-                ROIheight = imageHeight;
-            }
-            //ros::Time start5 = ros::Time::now();
-            // Publish image with marker outlines
-            if (drawMarkers){
-                markerImagePub.publish(cv_ptr->toImageMsg());
-            }
-            //ros::Time end5 = ros::Time::now();
-            //std::cout << "delt5: " << (end5-start5).toSec() << std::endl;
-            
-            // Send out signal if special markers not found
-            for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
-            {
-                if (it->second == false)
-                {
-                    //Publish marker centers
-                    char buffer[4];
-                    sprintf(buffer,"%d",it->first);
-                    aruco_ros::Center centerMsg;
-                    centerMsg.header.stamp = imageMsg->header.stamp;
-                    centerMsg.header.frame_id = buffer;
-                    centerMsg.found = false;
-                    markerPointPub.publish(centerMsg);
-                }
+                double maxWidthHeight = std::max(newROIright - newROIleft,newROIbottom - newROItop);
+                newROIleft = (int) (newROIleft - (maxWidthHeight - (newROIright-newROIleft))/2.0);
+                newROItop = (int) (newROItop - (maxWidthHeight - (newROIbottom-newROItop))/2.0);
+                ROIleft = std::max(0,newROIleft - (int) (adaptiveROIfactor*maxWidthHeight));
+                ROItop = std::max(0,newROItop - (int) (adaptiveROIfactor*maxWidthHeight));
+                ROIwidth = std::min(imageWidth - ROIleft, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
+                ROIheight = std::min(imageHeight - ROItop, (int) ((1+2*adaptiveROIfactor)*maxWidthHeight));
             }
         }
-        catch (std::exception &ex){
-            cout<<"Exception :"<<ex.what()<<endl;
+        else {
+            // Reset ROI if no markers found
+            ROIleft = 0;
+            ROItop = 0;
+            ROIwidth = imageWidth;
+            ROIheight = imageHeight;
         }
-        //std::cout << std::endl << std::endl << std::endl;
+        
+        // reset list of found special markers
+        for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
+        {
+            it->second = false;
+        }
+        
+        // Send out signal if special markers not found
+        for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
+        {
+            if (it->second == false)
+            {
+                //Publish marker centers
+                char buffer[4];
+                sprintf(buffer,"%d",it->first);
+                aruco_ros::Center centerMsg;
+                centerMsg.header.stamp = imageMsg->header.stamp;
+                centerMsg.header.frame_id = buffer;
+                centerMsg.found = false;
+                markerPointPub.publish(centerMsg);
+            }
+        }
+        
+        // Draw marker on image and publish
+        if (drawMarkers)
+        {
+            cv::aruco::drawDetectedMarkers(imageROI, markerCorners, markerIDs, cv::Scalar(0,0,255));
+            markerImagePub.publish(cv_ptr->toImageMsg());
+        }
     }
     
     bool setSpecialMarkers(aruco_ros::SpecialMarkers::Request &req,aruco_ros::SpecialMarkers::Response &resp)
@@ -373,7 +327,6 @@ public:
 
 };//End of class SubscribeAndPublish
 
-
 int main(int argc, char** argv)
 {
     ros::init(argc, argv, "aruco_ros");
@@ -384,13 +337,23 @@ int main(int argc, char** argv)
     return 0;
 }
 
-void rvec2quat(cv::Mat &rvec, cv::Mat &quat)
+void rvec2quat(cv::Vec3d &rvec, tf::Quaternion &quat)
 {
-    float theta = sqrt(pow(rvec.at<float>(0,0),2) + pow(rvec.at<float>(1,0),2) + pow(rvec.at<float>(2,0),2));
-    cv::Mat unit = rvec/theta;
-    quat.at<float>(0,0) = cos(theta/2);
-    quat.at<float>(1,0) = sin(theta/2)*unit.at<float>(0,0);
-    quat.at<float>(2,0) = sin(theta/2)*unit.at<float>(1,0);
-    quat.at<float>(3,0) = sin(theta/2)*unit.at<float>(2,0);
+    double theta = std::sqrt(std::pow(rvec[0],2) + std::pow(rvec[1],2) + std::pow(rvec[2],2));
+    cv::Mat unit = cv::Mat(rvec)/theta;
+    
+    //std::cout << "rvec: " << rvec << std::endl;
+    //std::cout << "theta: " << theta << std::endl;
+    //std::cout << "unit: " << unit << std::endl;
+    
+    quat = tf::Quaternion(std::sin(theta/2)*unit.at<double>(0,0),
+                          std::sin(theta/2)*unit.at<double>(1,0),
+                          std::sin(theta/2)*unit.at<double>(2,0),
+                          std::cos(theta/2));
+    //quat.at<double>(0,0) = std::cos(theta/2);
+    //quat.at<double>(1,0) = std::sin(theta/2)*unit.at<double>(0,0);
+    //quat.at<double>(2,0) = std::sin(theta/2)*unit.at<double>(1,0);
+    //quat.at<double>(3,0) = std::sin(theta/2)*unit.at<double>(2,0);
+    
+    //std::cout << "quat: " << quat << std::endl;
 }
-
