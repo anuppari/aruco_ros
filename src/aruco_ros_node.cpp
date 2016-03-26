@@ -57,8 +57,9 @@ class SubscribeAndPublish
     std::map<int, bool> specialMarkersFound;
     
     // debug
-    //cv::Mat lastImage;
-    double lastImageTime;
+    cv::Mat lastImage;
+    ros::Time lastImageTime;
+    int doubleTimeCount;
 public:
     SubscribeAndPublish() : it(n)
     {
@@ -69,13 +70,21 @@ public:
         nh.param<double>("markerSize", markerSize, 0.2032);
         nh.param<bool>("drawMarkers", drawMarkers, true);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
+        lastImage = cv::Mat();
+        doubleTimeCount = 0;
         
         // Set ROI parameters
         adaptiveROIfactor = 0.25;
+        ROIleft = -1;
+        ROItop = -1;
+        ROIwidth = -1;
+        ROIheight = -1;
         
         // Get camera parameters
         camMat = cv::Mat();
         distCoeffs = cv::Mat();
+        imageWidth = -1;
+        imageHeight = -1;
         std::cout << "Getting camera parameters on topic: "+cameraName+"/camera_info" << std::endl;
         gotCamParam = false;
         camInfoSub = n.subscribe(cameraName+"/camera_info",1,&SubscribeAndPublish::camInfoCB,this);
@@ -139,12 +148,46 @@ public:
             return;
         }
         
-        // Reset ROI on first call
-        if (!(0 <= ROIleft && 0 <= ROIwidth && ROIleft + ROIwidth <= image.cols && 0 <= ROItop && 0 <= ROIheight && ROItop + ROIheight <= image.rows))
+        // DEBUG
+        ros::Time timeNow = imageMsg->header.stamp;
+        double delT = timeNow.toSec() - lastImageTime.toSec();
+        if (false) //(delT == 0)
+        {
+            char buffer[2];
+            sprintf(buffer,"%d",doubleTimeCount);
+            cv::imwrite(std::string("/home/ncr/testdiff/lastImage")+buffer+std::string(".jpg"),lastImage);
+            cv::imwrite(std::string("/home/ncr/testdiff/thisImage")+buffer+std::string(".jpg"),image);
+            cv::Mat diffImage;
+            cv::absdiff(image,lastImage,diffImage);
+            double min, max;
+            cv::minMaxIdx(diffImage,&min,&max);
+            cv::Mat diffImageScaled;
+            cv::convertScaleAbs(diffImage,diffImageScaled,255.0/(max-min),-1.0*min);
+            cv::imwrite(std::string("/home/ncr/testdiff/diffImage")+buffer+std::string(".jpg"),diffImage);
+            cv::imwrite(std::string("/home/ncr/testdiff/diffImageScaled")+buffer+std::string(".jpg"),diffImageScaled);
+            std::cout.precision(18);
+            std::cout << "lastImageTime sec: " << lastImageTime.sec << std::endl;
+            std::cout << "lastImageTime nsec: " << lastImageTime.nsec << std::endl;
+            std::cout << "timeNow sec: " << timeNow.sec << std::endl;
+            std::cout << "timeNow nsec: " << timeNow.nsec << std::endl;
+            std::cout << "lastImageTime: " << lastImageTime.toSec() << std::endl;
+            std::cout << "timeNow: " << timeNow.toSec() << std::endl;
+            std::cout << "doubleTimeCount: " << doubleTimeCount << std::endl;
+            doubleTimeCount++;
+        }
+        lastImageTime = timeNow;
+        lastImage = image.clone();
+        
+        // Get image dimensions on first call if camera_info not called
+        if (!(imageHeight > 0 && imageWidth > 0))
         {
             imageWidth = image.cols;
             imageHeight = image.rows;
-            
+        }
+        
+        // Reset ROI on first call
+        if (!(ROIleft >= 0 && ROItop >= 0 && ROIwidth >=0 && ROIheight >= 0 && ROIleft + ROIwidth <= imageWidth && ROItop + ROIheight <= imageHeight))
+        {
             ROIleft = 0;
             ROItop = 0;
             ROIwidth = imageWidth;
@@ -189,12 +232,12 @@ public:
             int newROItop = imageHeight;
             int newROIbottom = 0;
             int newROIright = 0;
-                
+            
             for (int i = 0; i < markerIDs.size(); i++)
             {
                 // Common Info
                 char buffer[4];
-                sprintf(buffer,"%d",markerIDs[i]);
+                std::sprintf(buffer,"%d",markerIDs[i]);
                 
                 // Update special marker list
                 std::map<int,bool>::iterator it = specialMarkersFound.find(markerIDs[i]);
