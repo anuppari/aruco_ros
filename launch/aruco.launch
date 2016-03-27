@@ -31,7 +31,7 @@
     <param name="cornerRefinementMinAccuracy" value="0.1" />
     <param name="markerBorderBits" value="1" />
     <param name="perspectiveRemovePixelPerCell" value="10" />
-    <param name="perspectiveRemoveIgnoredMarginPerCell" value="0.05" />
+    <param name="perspectiveRemoveIgnoredMarginPerCell" value="0.13" />
     <param name="maxErroneousBitsInBorderRate" value="0.35" />
     <param name="minOtsuStdDev" value="5.0" />
     <param name="errorCorrectionRate" value="0.6" />
