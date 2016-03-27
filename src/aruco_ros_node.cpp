@@ -73,6 +73,30 @@ public:
         lastImage = cv::Mat();
         doubleTimeCount = 0;
         
+        //Adjust marker detector parameters
+        markerDictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_ORIGINAL);
+        detectorParams = cv::aruco::DetectorParameters::create();
+        nh.getParam("adaptiveThreshWinSizeMin", detectorParams->adaptiveThreshWinSizeMin);
+        nh.getParam("adaptiveThreshWinSizeMax", detectorParams->adaptiveThreshWinSizeMax);
+        nh.getParam("adaptiveThreshWinSizeStep", detectorParams->adaptiveThreshWinSizeStep);
+        nh.getParam("adaptiveThreshConstant", detectorParams->adaptiveThreshConstant);
+        nh.getParam("minMarkerPerimeterRate", detectorParams->minMarkerPerimeterRate);
+        nh.getParam("maxMarkerPerimeterRate", detectorParams->maxMarkerPerimeterRate);
+        nh.getParam("polygonalApproxAccuracyRate", detectorParams->polygonalApproxAccuracyRate);
+        nh.getParam("minCornerDistanceRate", detectorParams->minCornerDistanceRate);
+        nh.getParam("minDistanceToBorder", detectorParams->minDistanceToBorder);
+        nh.getParam("minMarkerDistanceRate", detectorParams->minMarkerDistanceRate);
+        nh.param<bool>("doCornerRefinement", detectorParams->doCornerRefinement, true);
+        nh.getParam("cornerRefinementWinSize", detectorParams->cornerRefinementWinSize);
+        nh.getParam("cornerRefinementMaxIterations", detectorParams->cornerRefinementMaxIterations);
+        nh.getParam("cornerRefinementMinAccuracy", detectorParams->cornerRefinementMinAccuracy);
+        nh.getParam("markerBorderBits", detectorParams->markerBorderBits);
+        nh.getParam("perspectiveRemovePixelPerCell", detectorParams->perspectiveRemovePixelPerCell);
+        nh.getParam("perspectiveRemoveIgnoredMarginPerCell", detectorParams->perspectiveRemoveIgnoredMarginPerCell);
+        nh.getParam("maxErroneousBitsInBorderRate", detectorParams->maxErroneousBitsInBorderRate);
+        nh.getParam("minOtsuStdDev", detectorParams->minOtsuStdDev);
+        nh.getParam("errorCorrectionRate", detectorParams->errorCorrectionRate);
+        
         // Set ROI parameters
         adaptiveROIfactor = 0.25;
         ROIleft = -1;
@@ -91,11 +115,6 @@ public:
         
         // Start service
         service = nh.advertiseService("setSpecialMarkers", &SubscribeAndPublish::setSpecialMarkers,this);
-        
-        //Adjust marker detector parameters
-        markerDictionary = cv::aruco::getPredefinedDictionary(cv::aruco::DICT_ARUCO_ORIGINAL);
-        detectorParams = cv::aruco::DetectorParameters::create();
-        detectorParams->doCornerRefinement = true;
         
         // marker pose and center publishers
         markerPosePub = n.advertise<geometry_msgs::PoseStamped>("markers",10);
@@ -149,34 +168,35 @@ public:
         }
         
         // DEBUG
-        ros::Time timeNow = imageMsg->header.stamp;
-        double delT = timeNow.toSec() - lastImageTime.toSec();
-        if (false) //(delT == 0)
-        {
-            char buffer[2];
-            sprintf(buffer,"%d",doubleTimeCount);
-            cv::imwrite(std::string("/home/ncr/testdiff/lastImage")+buffer+std::string(".jpg"),lastImage);
-            cv::imwrite(std::string("/home/ncr/testdiff/thisImage")+buffer+std::string(".jpg"),image);
-            cv::Mat diffImage;
-            cv::absdiff(image,lastImage,diffImage);
-            double min, max;
-            cv::minMaxIdx(diffImage,&min,&max);
-            cv::Mat diffImageScaled;
-            cv::convertScaleAbs(diffImage,diffImageScaled,255.0/(max-min),-1.0*min);
-            cv::imwrite(std::string("/home/ncr/testdiff/diffImage")+buffer+std::string(".jpg"),diffImage);
-            cv::imwrite(std::string("/home/ncr/testdiff/diffImageScaled")+buffer+std::string(".jpg"),diffImageScaled);
-            std::cout.precision(18);
-            std::cout << "lastImageTime sec: " << lastImageTime.sec << std::endl;
-            std::cout << "lastImageTime nsec: " << lastImageTime.nsec << std::endl;
-            std::cout << "timeNow sec: " << timeNow.sec << std::endl;
-            std::cout << "timeNow nsec: " << timeNow.nsec << std::endl;
-            std::cout << "lastImageTime: " << lastImageTime.toSec() << std::endl;
-            std::cout << "timeNow: " << timeNow.toSec() << std::endl;
-            std::cout << "doubleTimeCount: " << doubleTimeCount << std::endl;
-            doubleTimeCount++;
-        }
-        lastImageTime = timeNow;
-        lastImage = image.clone();
+        //ros::Time timeNow = imageMsg->header.stamp;
+        //double delT = timeNow.toSec() - lastImageTime.toSec();
+        //if (delT == 0) //(delT == 0)
+        //{
+            //char buffer[2];
+            //sprintf(buffer,"%d",doubleTimeCount);
+            ////cv::imwrite(std::string("/home/ncr/testdiff/lastImage")+buffer+std::string(".jpg"),lastImage);
+            ////cv::imwrite(std::string("/home/ncr/testdiff/thisImage")+buffer+std::string(".jpg"),image);
+            ////cv::Mat diffImage;
+            ////cv::absdiff(image,lastImage,diffImage);
+            ////double min, max;
+            ////cv::minMaxIdx(diffImage,&min,&max);
+            ////cv::Mat diffImageScaled;
+            ////cv::convertScaleAbs(diffImage,diffImageScaled,255.0/(max-min),-1.0*min);
+            ////cv::imwrite(std::string("/home/ncr/testdiff/diffImage")+buffer+std::string(".jpg"),diffImage);
+            ////cv::imwrite(std::string("/home/ncr/testdiff/diffImageScaled")+buffer+std::string(".jpg"),diffImageScaled);
+            //std::cout.precision(18);
+            //std::cout << "lastImageTime sec: " << lastImageTime.sec << std::endl;
+            //std::cout << "lastImageTime nsec: " << lastImageTime.nsec << std::endl;
+            //std::cout << "timeNow sec: " << timeNow.sec << std::endl;
+            //std::cout << "timeNow nsec: " << timeNow.nsec << std::endl;
+            //std::cout << "lastImageTime: " << lastImageTime.toSec() << std::endl;
+            //std::cout << "timeNow: " << timeNow.toSec() << std::endl;
+            //std::cout << "doubleTimeCount: " << doubleTimeCount << std::endl;
+            //doubleTimeCount++;
+        //}
+        //lastImageTime = timeNow;
+        //lastImage = image.clone();
+        
         
         // Get image dimensions on first call if camera_info not called
         if (!(imageHeight > 0 && imageWidth > 0))
