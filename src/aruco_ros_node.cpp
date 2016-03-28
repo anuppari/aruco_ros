@@ -36,6 +36,7 @@ class SubscribeAndPublish
     
     // adaptive ROI
     bool adaptiveROI;
+    bool drawROI;
     int ROItop;
     int ROIleft;
     int ROIwidth;
@@ -58,6 +59,7 @@ public:
         nh.param<std::string>("image_frame_id", image_frame_id, "image");
         nh.param<double>("markerSize", markerSize, 0.2032);
         nh.param<bool>("drawMarkers", drawMarkers, true);
+        nh.param<bool>("drawROI", drawROI, false);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
         
         // Set ROI parameters
@@ -165,8 +167,11 @@ public:
             }
             
             // draw ROI
-            cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0));
+            if (drawROI) { cv::rectangle(image,cv::Point2d(ROIleft,ROItop),cv::Point2d(ROIleft+ROIwidth-1,ROItop+ROIheight-1),cv::Scalar(0,255,0)); }
         }
+        
+        // reset list of found special markers
+        for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it) { it->second = false; }
         
         //Detection of markers in the image passed
         vector<aruco::Marker> TheMarkers;
@@ -268,14 +273,8 @@ public:
         }
         
         // Publish image with marker outlines
-        if (drawMarkers){
+        if (drawMarkers) {
             markerImagePub.publish(cv_ptr->toImageMsg());
-        }
-        
-        // reset list of found special markers
-        for (std::map<int,bool>::iterator it = specialMarkersFound.begin(); it != specialMarkersFound.end(); ++it)
-        {
-            it->second = false;
         }
         
         // Send out signal if special markers not found
