@@ -4,6 +4,8 @@
   <arg name="drawMarkers" default="true" />
   <arg name="adaptiveROI" default="true" />
   <arg name="image_frame_id" default="image" />
+  <arg name="republishCamInfo" default="false" />
+  <arg name="drawROI" default="true" />
   <arg name="view" default="true" />
   
   <!-- Launch AR tag tracking node -->
@@ -13,6 +15,8 @@
     <param name="drawMarkers" value="$(arg drawMarkers)" /> <!-- publish image with markers highlighted if true -->
     <param name="adaptiveROI" value="$(arg adaptiveROI)" /> <!-- adaptive ROI to increase frame rate -->
     <param name="image_frame_id" value="$(arg image_frame_id)" /> <!-- tf frame_id of image. Used as parent for publishing marker tf -->
+    <param name="drawROI" value="$(arg drawROI)" />
+    <param name="republishCamInfo" value="$(arg republishCamInfo)" />
   </node>
   
   <node if="$(arg view)" name="image_view" pkg="image_view" type="image_view">

@@ -28,11 +28,13 @@ class SubscribeAndPublish
     ros::Publisher markerPosePub;
     ros::Publisher markerPointPub;
     ros::Publisher markerImagePub;
+    ros::Publisher camInfoPub;
     tf::TransformBroadcaster tfBr;
     std::string cameraName;
     std::string image_frame_id;
     aruco::MarkerDetector MDetector;
     ros::ServiceServer service;
+    sensor_msgs::CameraInfo savedCamInfo;
     
     // adaptive ROI
     bool adaptiveROI;
@@ -42,6 +44,7 @@ class SubscribeAndPublish
     int ROIwidth;
     int ROIheight;
     double adaptiveROIfactor;
+    bool republishCamInfo;
     
     bool gotCamParam;
     int imageWidth;
@@ -61,6 +64,7 @@ public:
         nh.param<bool>("drawMarkers", drawMarkers, true);
         nh.param<bool>("drawROI", drawROI, false);
         nh.param<bool>("adaptiveROI", adaptiveROI, true);
+        nh.param<bool>("republishCamInfo", republishCamInfo, false);
         
         // Set ROI parameters
         adaptiveROIfactor = 0.25;
@@ -91,6 +95,7 @@ public:
         //Publisher for image with marker outlines
         if (drawMarkers){
             markerImagePub = n.advertise<sensor_msgs::Image>("markerImage",10);
+            if (republishCamInfo) { camInfoPub = n.advertise<sensor_msgs::CameraInfo>("markerImage/camera_info",10); }
         }
         
         // Image and camera parameter subscribers
@@ -98,9 +103,10 @@ public:
     }
     
     // callback for getting camera intrinsic parameters
-    void camInfoCB(const sensor_msgs::CameraInfoConstPtr& camInfoMsg)
+    void camInfoCB(sensor_msgs::CameraInfo camInfoMsg)
     {
         //get camera info
+        savedCamInfo = camInfoMsg;
         image_geometry::PinholeCameraModel cam_model;
         cam_model.fromCameraInfo(camInfoMsg);
         cv::Mat camMatCV = cv::Mat(cam_model.fullIntrinsicMatrix());
@@ -111,8 +117,8 @@ public:
             camMat = cv::Mat();
             distCoeffs = cv::Mat();
         }
-        imageHeight = camInfoMsg->height;
-        imageWidth = camInfoMsg->width;
+        imageHeight = camInfoMsg.height;
+        imageWidth = camInfoMsg.width;
         
         //unregister subscriber
         camInfoSub.shutdown();
@@ -275,6 +281,11 @@ public:
         // Publish image with marker outlines
         if (drawMarkers) {
             markerImagePub.publish(cv_ptr->toImageMsg());
+            if (republishCamInfo)
+            {
+                savedCamInfo.header = imageMsg->header;
+                camInfoPub.publish(savedCamInfo);
+            }
         }
         
         // Send out signal if special markers not found
